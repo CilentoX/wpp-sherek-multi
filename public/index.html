@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shrek Bot - Multi Client Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <style>
+        body { background-color: #0c0c0c; color: #e5e7eb; font-family: 'Inter', sans-serif; }
+        .glass { background: rgba(31, 41, 55, 0.4); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .shrek-green { color: #5d9b2b; }
+        .shrek-bg { background-color: #5d9b2b; }
+        .card-shimmer { position: relative; overflow: hidden; }
+        .card-shimmer::after {
+            content: ""; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.03), transparent);
+            transform: rotate(45deg); animation: shimmer 3s infinite linear;
+        }
+        @keyframes shimmer { 0% { transform: translateX(-100%) rotate(45deg); } 100% { transform: translateX(100%) rotate(45deg); } }
+    </style>
+</head>
+<body class="p-8">
+    <div class="max-w-6xl mx-auto">
+        <header class="flex justify-between items-center mb-12">
+            <div>
+                <h1 class="text-4xl font-bold tracking-tight">Shrek <span class="shrek-green">Multi-Client</span></h1>
+                <p class="text-gray-400 mt-2">Gerencie suas instâncias de WhatsApp em tempo real.</p>
+            </div>
+            <button onclick="createNewSession()" class="shrek-bg text-black font-bold py-3 px-6 rounded-lg transition hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(93,155,43,0.3)]">
+                + Nova Sessão
+            </button>
+        </header>
+
+        <main id="client-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- Clients will be injected here -->
+        </main>
+    </div>
+
+    <!-- QR Modal -->
+    <div id="qr-modal" class="fixed inset-0 bg-black/80 hidden z-50 flex items-center justify-center p-4">
+        <div class="glass p-8 rounded-2xl max-w-sm w-full text-center">
+            <h2 id="modal-title" class="text-2xl font-bold mb-4">Escaneie o QR Code</h2>
+            <div id="qrcode-container" class="bg-white p-4 rounded-xl mb-6 mx-auto w-fit"></div>
+            <p class="text-sm text-gray-400 mb-6">Abra o WhatsApp > Aparelhos Conectados > Conectar um aparelho</p>
+            <button onclick="closeModal()" class="w-full py-2 bg-gray-700 rounded-lg hover:bg-gray-600 transition">Fechar</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const clientList = document.getElementById('client-list');
+        const qrModal = document.getElementById('qr-modal');
+        const qrcodeContainer = document.getElementById('qrcode-container');
+        const modalTitle = document.getElementById('modal-title');
+        let clientsMap = new Map();
+
+        // Load sessions from local storage
+        const storedSessions = JSON.parse(localStorage.getItem('shrek_sessions') || '[]');
+        storedSessions.forEach(s => clientsMap.set(s.id, { ...s, status: 'CHECKING...' }));
+
+        socket.on('connect', () => {
+            socket.emit('join-admin');
+        });
+
+        socket.on('init', (clients) => {
+            // Merge with local storage (server is source of truth for status)
+            clients.forEach(c => clientsMap.set(c.id, c));
+            renderClients();
+        });
+
+        socket.on('status-update', (data) => {
+            const client = clientsMap.get(data.id) || { id: data.id };
+            Object.assign(client, data);
+            clientsMap.set(data.id, client);
+            renderClients();
+            
+            if (data.status === 'WAITING_QR' && data.qr) {
+                // We only show QR automatically if it's the current session being created, 
+                // but let's just render the list and let user click
+            }
+        });
+
+        function renderClients() {
+            clientList.innerHTML = '';
+            clientsMap.forEach(client => {
+                const card = document.createElement('div');
+                card.className = 'glass p-6 rounded-2xl flex flex-col justify-between card-shimmer';
+                
+                const statusColor = getStatusColor(client.status);
+                const scanUrl = `${window.location.origin}/scan.html?id=${client.id}`;
+                
+                card.innerHTML = `
+                    <div>
+                        <div class="flex justify-between items-start mb-4">
+                            <span class="text-xs font-bold tracking-widest text-gray-400 uppercase">Sessão</span>
+                            <span class="px-2 py-1 rounded text-[10px] font-bold ${statusColor.bg} ${statusColor.text}">${client.status}</span>
+                        </div>
+                        <h3 class="text-xl font-bold mb-1">${client.displayName || 'Sem nome'}</h3>
+                        <p class="text-[10px] text-gray-500 font-mono mb-2 truncate">${client.id}</p>
+                        <p class="text-xs text-gray-400">${client.user ? '+' + client.user : 'Não conectado'}</p>
+                    </div>
+                    <div class="mt-8 flex flex-col gap-2">
+                        <div class="flex gap-2">
+                            ${(client.status === 'WAITING_QR' || client.status === 'INITIALIZING') ? 
+                                `<button onclick="showQR('${client.id}', '${client.qr}')" class="flex-1 py-2 text-xs font-bold bg-[#5d9b2b]/20 text-[#5d9b2b] hover:bg-[#5d9b2b]/30 rounded-lg transition">Ver QR</button>` : ''
+                            }
+                            <button onclick="copyToClipboard('${scanUrl}')" class="flex-1 py-2 text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg transition">Copiar Link</button>
+                        </div>
+                        <button onclick="deleteSession('${client.id}')" class="w-full py-2 text-xs font-bold bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition">Excluir</button>
+                    </div>
+                `;
+                clientList.appendChild(card);
+            });
+        }
+
+        function getStatusColor(status) {
+            switch(status) {
+                case 'READY': return { bg: 'bg-green-500/10', text: 'text-green-500' };
+                case 'WAITING_QR': return { bg: 'bg-yellow-500/10', text: 'text-yellow-500' };
+                case 'INITIALIZING': return { bg: 'bg-blue-500/10', text: 'text-blue-500' };
+                case 'ERROR': return { bg: 'bg-red-500/10', text: 'text-red-500' };
+                default: return { bg: 'bg-gray-500/20', text: 'text-gray-400' };
+            }
+        }
+
+        async function createNewSession() {
+            const name = prompt('Digite um nome para esta sessão:');
+            if (!name) return;
+            
+            const response = await fetch('/api/clients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await response.json();
+            
+            // Save to local storage
+            const current = JSON.parse(localStorage.getItem('shrek_sessions') || '[]');
+            current.push({ id: data.id, displayName: name });
+            localStorage.setItem('shrek_sessions', JSON.stringify(current));
+
+            clientsMap.set(data.id, { id: data.id, displayName: name, status: 'INITIALIZING' });
+            renderClients();
+        }
+
+        async function deleteSession(id) {
+            if (!confirm(`Deseja realmente excluir a sessão?`)) return;
+            await fetch(`/api/clients/${id}`, { method: 'DELETE' });
+            
+            // Remove from map
+            clientsMap.delete(id);
+            
+            // Remove from local storage
+            const current = JSON.parse(localStorage.getItem('shrek_sessions') || '[]');
+            const filtered = current.filter(s => s.id !== id);
+            localStorage.setItem('shrek_sessions', JSON.stringify(filtered));
+            
+            renderClients();
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text);
+            alert('Link único copiado para o clipboard!');
+        }
+
+        function showQR(id, qr) {
+            if (!qr) return alert('QR Code ainda não gerado. Aguarde um momento...');
+            modalTitle.innerText = `Scan para: ${clientsMap.get(id).displayName}`;
+            qrcodeContainer.innerHTML = '';
+            new QRCode(qrcodeContainer, {
+                text: qr,
+                width: 256,
+                height: 256,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+            qrModal.classList.remove('hidden');
+        }
+
+        function closeModal() {
+            qrModal.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>

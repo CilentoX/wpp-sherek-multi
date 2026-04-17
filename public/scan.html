@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conectar WhatsApp - Shrek Bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <style>
+        body { background-color: #0c0c0c; color: #e5e7eb; font-family: 'Inter', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .glass { background: rgba(31, 41, 55, 0.4); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .shrek-green { color: #5d9b2b; }
+        #qrcode-container { transition: all 0.5s ease; }
+        .success-fetti { animation: pop 0.5s ease-out; }
+        @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body class="p-6">
+    <div class="glass p-10 rounded-3xl max-w-sm w-full text-center relative">
+        <div id="status-badge" class="absolute top-4 right-4 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-blue-500/10 text-blue-400">
+            Iniciando...
+        </div>
+
+        <h1 class="text-3xl font-bold mb-2">Shrek <span class="shrek-green">Bot</span></h1>
+        <p id="sub-title" class="text-gray-400 text-sm mb-8">Prepare-se para entrar no pântano.</p>
+
+        <div id="loading-spinner" class="w-16 h-16 border-4 border-white/10 border-t-[#5d9b2b] rounded-full animate-spin mx-auto mb-8"></div>
+        
+        <div id="qrcode-container" class="bg-white p-4 rounded-2xl mb-8 mx-auto w-fit hidden"></div>
+
+        <div id="instruction-text" class="hidden">
+            <h3 class="font-bold mb-2">Como conectar:</h3>
+            <ol class="text-sm text-gray-400 text-left list-decimal list-inside space-y-2">
+                <li>Abra o WhatsApp no seu celular</li>
+                <li>Toque em <b>Menu</b> ou <b>Configurações</b></li>
+                <li>Selecione <b>Aparelhos Conectados</b></li>
+                <li>Toque em <b>Conectar um Aparelho</b></li>
+                <li>Aponte sua câmera para este QR Code</li>
+            </ol>
+        </div>
+
+        <div id="success-message" class="hidden">
+            <div class="text-6xl mb-4">💚</div>
+            <h2 class="text-2xl font-bold mb-2">Conectado!</h2>
+            <p class="text-gray-400">Agora você pode fechar esta aba e começar a usar o bot.</p>
+        </div>
+
+        <div id="error-message" class="hidden">
+            <div class="text-6xl mb-4">❌</div>
+            <h2 class="text-2xl font-bold mb-2">Erro</h2>
+            <p id="error-text" class="text-red-400 text-sm">Não foi possível carregar a sessão.</p>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('id');
+        const socket = io();
+
+        const qrcodeContainer = document.getElementById('qrcode-container');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const instructionText = document.getElementById('instruction-text');
+        const successMessage = document.getElementById('success-message');
+        const errorMessage = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+        const statusBadge = document.getElementById('status-badge');
+        const subTitle = document.getElementById('sub-title');
+
+        if (!sessionId) {
+            showError("ID da sessão não fornecido.");
+        } else {
+            socket.emit('join', sessionId);
+        }
+
+        socket.on('status-update', (data) => {
+            console.log('Update:', data);
+            updateUI(data);
+        });
+
+        function updateUI(client) {
+            statusBadge.innerText = client.status;
+            
+            if (client.status === 'WAITING_QR' && client.qr) {
+                loadingSpinner.classList.add('hidden');
+                qrcodeContainer.classList.remove('hidden');
+                instructionText.classList.remove('hidden');
+                renderQR(client.qr);
+            } else if (client.status === 'READY') {
+                loadingSpinner.classList.add('hidden');
+                qrcodeContainer.classList.add('hidden');
+                instructionText.classList.add('hidden');
+                successMessage.classList.remove('hidden');
+                subTitle.innerText = "Sessão Pronta!";
+                statusBadge.className = "absolute top-4 right-4 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-green-500/10 text-green-500";
+            } else if (client.status === 'ERROR' || client.status === 'AUTH_FAILURE') {
+                showError(client.message || "Erro na autenticação.");
+            }
+        }
+
+        function renderQR(qr) {
+            qrcodeContainer.innerHTML = '';
+            new QRCode(qrcodeContainer, {
+                text: qr,
+                width: 200,
+                height: 200,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+        }
+
+        function showError(msg) {
+            loadingSpinner.classList.add('hidden');
+            qrcodeContainer.classList.add('hidden');
+            instructionText.classList.add('hidden');
+            errorMessage.classList.remove('hidden');
+            errorText.innerText = msg;
+            statusBadge.className = "absolute top-4 right-4 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-red-500/10 text-red-500";
+            statusBadge.innerText = "ERRO";
+        }
+    </script>
+</body>
+</html>
