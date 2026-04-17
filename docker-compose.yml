@@ -2,8 +2,6 @@ services:
   shrek-bot:
     build: .
     container_name: shrek-bot-multi
-    ports:
-      - "3000:3000"
     volumes:
       - ./.wwebjs_auth:/app/.wwebjs_auth
       - ./shrek_script.txt:/app/shrek_script.txt
